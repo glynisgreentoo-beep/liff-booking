@@ -7,16 +7,13 @@
   <script src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"></script>
   <style>
     body { font-family: sans-serif; display: flex; justify-content: center;
-           align-items: center; min-height: 100vh; background: #f0f4f8; }
+           align-items: center; min-height: 100vh; background: #f0f4f8; margin: 0; }
     .card { background: white; padding: 40px; border-radius: 16px;
-            text-align: center; max-width: 400px; }
+            text-align: center; max-width: 400px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
     .spinner { width: 40px; height: 40px; margin: 16px auto;
                border: 3px solid #eee; border-top-color: #06C755;
                border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
-    button { background: #06C755; color: white; border: none; padding: 10px 20px;
-             border-radius: 8px; cursor: pointer; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -27,51 +24,30 @@
   <script>
     const LIFF_ID = "2010052302-MDjNIaeq";
     const CAL_URL = "https://cal.com/glyn-dryvr9";
-
+ 
     async function init() {
       try {
         await liff.init({ liffId: LIFF_ID });
-
+ 
         if (liff.isInClient()) {
-          // LINE 內建瀏覽器：自動取得 User ID
+          // ✅ LINE 內建瀏覽器：抓取 User ID 後跳轉
           if (!liff.isLoggedIn()) {
             liff.login();
             return;
           }
           const profile = await liff.getProfile();
-          const url = `${CAL_URL}?lineUserId=${encodeURIComponent(profile.userId)}`;
-          window.location.href = url;
+          window.location.href = `${CAL_URL}?lineUserId=${encodeURIComponent(profile.userId)}`;
         } else {
-          // 電腦或外部瀏覽器：顯示手動輸入
-          showManualInput();
+          // ✅ 電腦或手機外部瀏覽器：直接跳轉，不帶 ID
+          window.location.href = CAL_URL;
         }
       } catch (err) {
-        showManualInput();
+        // ⚠️ LIFF 初始化失敗也直接跳轉，不卡住使用者
+        console.error("LIFF init error:", err);
+        window.location.href = CAL_URL;
       }
     }
-
-    function showManualInput() {
-      document.getElementById('content').innerHTML = `
-        <h2>歡迎預約</h2>
-        <p>請輸入你的 LINE User ID（測試用）</p>
-        <input type="text" id="userIdInput" placeholder="貼上你的 User ID (U...)" />
-        <button onclick="handleManualInput()">進入預約</button>
-        <p style="font-size: 12px; color: #999;">
-          或直接 <a href="${CAL_URL}">跳過 ID，進入預約</a>
-        </p>
-      `;
-    }
-
-    function handleManualInput() {
-      const userId = document.getElementById('userIdInput').value.trim();
-      if (userId) {
-        const url = `${CAL_URL}?lineUserId=${encodeURIComponent(userId)}`;
-        window.location.href = url;
-      } else {
-        alert('請輸入 User ID');
-      }
-    }
-
+ 
     init();
   </script>
 </body>
