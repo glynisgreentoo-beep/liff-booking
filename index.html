@@ -24,7 +24,6 @@
     <h2>正在載入預約頁面…</h2>
     <div class="spinner"></div>
   </div>
-
   <script>
     const LIFF_ID = "2010052302-MDjNIaeq";
     const CAL_URL = "https://cal.com/glyn-dryvr9";
@@ -32,18 +31,21 @@
     async function init() {
       try {
         await liff.init({ liffId: LIFF_ID });
-        
-        if (liff.isLoggedIn()) {
-          // LINE 環境：自動取得 ID
+
+        if (liff.isInClient()) {
+          // LINE 內建瀏覽器：自動取得 User ID
+          if (!liff.isLoggedIn()) {
+            liff.login();
+            return;
+          }
           const profile = await liff.getProfile();
           const url = `${CAL_URL}?lineUserId=${encodeURIComponent(profile.userId)}`;
           window.location.href = url;
         } else {
-          // 非 LINE 環境：顯示手動輸入表單
+          // 電腦或外部瀏覽器：顯示手動輸入
           showManualInput();
         }
       } catch (err) {
-        // 非 LIFF 環境（電腦瀏覽器）
         showManualInput();
       }
     }
