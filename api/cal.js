@@ -26,7 +26,9 @@ function parseDescription(description) {
     .replace(/<br[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
-    .replace(/`/g, "");
+    .replace(/`/g, "")
+    .replace(/\\\[/g, "[")
+    .replace(/\\\]/g, "]");
 
   const marker = plain.indexOf("[加購]");
   const priceMarker = plain.indexOf("[價格]");
