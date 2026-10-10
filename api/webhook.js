@@ -24,6 +24,7 @@ module.exports = async function handler(req, res) {
   const lineToken   = process.env.LINE_CHANNEL_TOKEN;
   const ownerId     = process.env.OWNER_LINE_USER_ID;
   const webhookSecret = process.env.CAL_WEBHOOK_SECRET;
+  // 店主通知可走獨立的商家 bot（OWNER_LINE_CHANNEL_TOKEN）；沒設就退回官方帳號 lineToken
   const ownerToken  = process.env.OWNER_LINE_CHANNEL_TOKEN || lineToken;
 
   if (!lineToken) return res.status(500).json({ error: "LINE_CHANNEL_TOKEN 未設定" });
@@ -51,12 +52,15 @@ module.exports = async function handler(req, res) {
 
     console.log("Webhook received:", triggerEvent);
 
-    // 只處理預約建立事件
-    if (triggerEvent !== "BOOKING_CREATED") {
+    // 只處理「預約建立」與「預約改期」兩種事件
+    const isCreate     = triggerEvent === "BOOKING_CREATED";
+    const isReschedule = triggerEvent === "BOOKING_RESCHEDULED";
+    if (!isCreate && !isReschedule) {
       return res.status(200).json({ ok: true, skipped: triggerEvent });
     }
 
     // 取出預約資訊
+    // 註：改期事件的 payload.startTime 已經是「新的」時間，直接沿用即可
     const bk = extractBooking(payload);
     const tw = bk.startTime ? toTaiwanTime(bk.startTime) : null;
     const timeStr = tw ? tw.full : "（時間未知）";
@@ -70,43 +74,60 @@ module.exports = async function handler(req, res) {
     // 可代入模板的變數
     const vars = {
       "方案": bk.title,
-      "加購": bk.addons ? "➕ 加購：" + bk.addons : "",
+      "加購": bk.addons ? "加購：" + bk.addons : "",
       "時間": timeStr,
       "時長": (bk.length || "?"),
       "姓名": bk.name || "未提供",
       "電話": bk.phone || "未提供",
+      // 備註 / 信箱 為純文字（前綴寫在模板，例如「📝 備註：{備註}」），空值整行移除
       "備註": bk.note || "",
       "信箱": bk.email || ""
     };
 
     // 內建預設訊息（模板讀不到時的後備）
-    const addonLine = bk.addons ? "➕ 加購：" + bk.addons + "\n" : "";
-    const noteLine = bk.note ? "📝 備註：" + bk.note + "\n" : "";
-    const emailLine = bk.email ? "✉️ Email：" + bk.email + "\n" : "";
+    const addonLine = bk.addons ? "加購：" + bk.addons + "\n" : "";
+    // 店主訊息附上備註、信箱（空值則不出現，不留空行）
+    const ownerExtra = (bk.note ? "\n📝 備註：" + bk.note : "") + (bk.email ? "\n✉️ Email：" + bk.email : "");
+
+    // 新預約
     const defaultOwner =
       "🔔 新預約通知\n\n📋 " + bk.title + "\n" + addonLine +
       "📅 " + timeStr + "\n⏱ " + (bk.length || "?") + " 分鐘\n" +
-      "👤 " + (bk.name || "未提供") + "\n📱 " + (bk.phone || "未提供") +
-      (noteLine ? "\n" + noteLine : "") +
-      (emailLine ? (noteLine ? "" : "\n") + emailLine : "");
+      "👤 " + (bk.name || "未提供") + "\n📱 " + (bk.phone || "未提供") + ownerExtra;
     const defaultCustomer =
       "✅ 預約確認\n\n感謝您的預約！\n\n📋 " + bk.title + "\n" + addonLine +
       "📅 " + timeStr + "\n⏱ " + (bk.length || "?") + " 分鐘\n\n" +
       "屆時期待為您服務 💆\n如需取消或改期，請直接回覆訊息。";
 
+    // 改期
+    const defaultOwnerRe =
+      "🔄 預約改期通知\n\n📋 " + bk.title + "\n" + addonLine +
+      "📅 新時間：" + timeStr + "\n⏱ " + (bk.length || "?") + " 分鐘\n" +
+      "👤 " + (bk.name || "未提供") + "\n📱 " + (bk.phone || "未提供") + ownerExtra;
+    const defaultCustomerRe =
+      "🔄 預約已改期\n\n您的預約時間已更新：\n\n📋 " + bk.title + "\n" + addonLine +
+      "📅 新時間：" + timeStr + "\n⏱ " + (bk.length || "?") + " 分鐘\n\n" +
+      "期待為您服務 💆\n如需再次調整，請直接回覆訊息。";
+
+    // 依事件類型選用對應模板 / 後備訊息
+    const ownerTplKey     = isReschedule ? "改期通知-店主" : "新預約-店主";
+    const customerTplKey  = isReschedule ? "改期通知-客人" : "預約確認-客人";
+    const ownerDefault    = isReschedule ? defaultOwnerRe : defaultOwner;
+    const customerDefault = isReschedule ? defaultCustomerRe : defaultCustomer;
+
     // ── 1. 通知店主 ──
-    const ownerMsg = (templates && templates["新預約-店主"])
-      ? renderTemplate(templates["新預約-店主"], vars)
-      : defaultOwner;
+    const ownerMsg = (templates && templates[ownerTplKey])
+      ? renderTemplate(templates[ownerTplKey], vars)
+      : ownerDefault;
 
     const ownerResult = await pushLine(ownerId, ownerMsg, ownerToken);
 
     // ── 2. 通知客人（如果有 lineUserId）──
     let customerResult = { ok: false, body: "無 lineUserId" };
     if (bk.lineUserId) {
-      const customerMsg = (templates && templates["預約確認-客人"])
-        ? renderTemplate(templates["預約確認-客人"], vars)
-        : defaultCustomer;
+      const customerMsg = (templates && templates[customerTplKey])
+        ? renderTemplate(templates[customerTplKey], vars)
+        : customerDefault;
 
       customerResult = await pushLine(bk.lineUserId, customerMsg, lineToken);
     }
