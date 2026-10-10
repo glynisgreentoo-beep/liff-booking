@@ -61,7 +61,8 @@ async function loadTemplates(calApiKey, calUsername) {
  * [區塊名] 以下到下一個 [ 之前的內容為該區塊
  */
 function parseTemplateBlocks(description) {
-  // 去 HTML
+  // 去 HTML，並還原 Cal.com 富文本的反斜線跳脫（\[ → [、\] → ]）
+  // 相容 <br data-soft="true"> 這種帶屬性的換行標籤
   const plain = description
     .replace(/<br[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, "")
@@ -75,6 +76,7 @@ function parseTemplateBlocks(description) {
   let matches = [];
   let m;
   while ((m = re.exec(plain)) !== null) {
+    // 區塊名去掉殘留反斜線，避免「\預約確認-客人」對不到
     matches.push({ name: m[1].trim().replace(/\\/g, ""), start: m.index, contentStart: m.index + m[0].length });
   }
 
@@ -92,7 +94,7 @@ function parseTemplateBlocks(description) {
 /**
  * 把模板字串裡的 {變數} 代入實際值
  * vars 例：{ 方案:"經典指壓", 時間:"6/1 14:00", 加購:"牛角加強", ... }
- * 特殊處理：{加購} 若為空，該行整行移除（避免留下空的「➕ 加購：」）
+ * 特殊處理：{加購} 若為空，該行整行移除（避免留下空的「加購：」）
  */
 function renderTemplate(tpl, vars) {
   let text = tpl;
@@ -187,17 +189,23 @@ function toTaiwanTime(isoStr) {
  */
 function extractBooking(bk) {
   // 服務名稱
-  const title = bk.title || bk.eventType?.title || bk.type || "預約";
+  // 優先用 Cal.com 的乾淨方案名 eventTitle（webhook 有）或 eventType.title（bookings API 有）；
+  // 兩者都沒有才退回 bk.title（Cal.com 自動組的長版「店主 和 客人 的 項目」）
+  const title = bk.eventTitle || bk.eventType?.title || bk.title || bk.type || "預約";
 
-  // 開始 / 結束時間（相容 startTime/endTime 與 start/end 兩種格式）
+  // 開始 / 結束時間（webhook 用 startTime/endTime；bookings API 用 start/end）
   const startTime = bk.startTime || bk.start || "";
-  const endTime = bk.endTime || bk.end || "";
+  const endTime   = bk.endTime   || bk.end   || "";
 
-  // 時長（分鐘）：先取明確欄位，取不到再用起訖時間相減
-  let length = bk.length || bk.lengthInMinutes || bk.duration
-    || bk.eventType?.length || bk.eventType?.lengthInMinutes || 0;
-  if (!length && startTime && endTime) {
+  // 時長（分鐘）
+  // 先用「實際預約的起訖時間」計算 —— 這段窗口已含加購多出來的時間，
+  // 才會隨加購變動。起訖拿不到時，才退回方案欄位（那是不含加購的基本時長）。
+  let length = 0;
+  if (startTime && endTime) {
     length = Math.round((new Date(endTime) - new Date(startTime)) / 60000);
+  }
+  if (!length) {
+    length = bk.length || bk.lengthInMinutes || bk.eventType?.length || bk.duration || 0;
   }
 
   // 客人姓名
