@@ -81,6 +81,42 @@ function parseDescription(description) {
   return { desc, addons, basePrice };
 }
 
+/**
+ * 解析「設定方案」描述裡的 [方案排序] 區塊
+ *
+ * 格式（放在隱藏的通知模板/設定方案描述中，通常接在模板區塊最下面）：
+ *   [方案排序]
+ *   牛角眼額（強推）
+ *   經典指壓(全身)
+ *   經典指壓(90分鐘)
+ *
+ * 一行一個方案名稱（用 Cal.com 後台顯示的方案標題），由上到下即顯示順序。
+ * 回傳名稱陣列（已清乾淨），找不到區塊回傳 []。
+ */
+function parseOrderList(description) {
+  if (!description) return [];
+
+  // 清掉 Cal.com 富文本的跳脫與 HTML（與其他解析一致）
+  const plain = description
+    .replace(/\\\[/g, "[").replace(/\\\]/g, "]")
+    .replace(/<br[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ");
+
+  const marker = plain.indexOf("[方案排序]");
+  if (marker === -1) return [];
+
+  // 取 [方案排序] 之後，到下一個 [區塊] 或結尾為止
+  const after = plain.substring(marker + "[方案排序]".length);
+  const nextMarker = after.indexOf("[");
+  const block = nextMarker === -1 ? after : after.substring(0, nextMarker);
+
+  return block
+    .split("\n")
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -99,6 +135,15 @@ module.exports = async function handler(req, res) {
     // ══ GET ══
     if (req.method === "GET") {
       const { action, eventTypeId, startTime, endTime } = req.query;
+
+      // 除錯端點（debug / debugTemplate）需帶正確的 key（沿用 REMINDER_KEY）
+      // 前端正常運作的 eventTypes / slots / config / createBooking 不受此限
+      if (action === "debug" || action === "debugTemplate") {
+        const adminKey = process.env.REMINDER_KEY;
+        if (!adminKey || req.query.key !== adminKey) {
+          return res.status(401).json({ error: "未授權：除錯端點需帶正確的 key 參數" });
+        }
+      }
 
       // debug
       if (action === "debug") {
@@ -162,6 +207,29 @@ module.exports = async function handler(req, res) {
               realUsername
             };
           });
+
+        // ── 依「設定方案」裡的 [方案排序] 清單排序 ──
+        // 從原始清單 raw 找出隱藏的設定/通知模板方案，讀它描述裡的 [方案排序]
+        const settingsEt = raw.find(et => {
+          const slug = (et.slug || "").toLowerCase();
+          const title = et.title || "";
+          return slug.includes("notify-template")
+            || title.indexOf("通知模板") !== -1
+            || title.indexOf("_設定") === 0;
+        });
+        const orderList = settingsEt ? parseOrderList(settingsEt.description || "") : [];
+
+        if (orderList.length) {
+          // 名稱 → 指定順序的索引；用 title 比對，退而求其次比 slug
+          const rank = et => {
+            let i = orderList.indexOf(et.title);
+            if (i === -1) i = orderList.indexOf(et.slug);
+            return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+          };
+          // Node 的 sort 是穩定排序：有列到的照清單順序，
+          // 沒列到的（rank 相同）留在後面並維持原順序。
+          eventTypes.sort((a, b) => rank(a) - rank(b));
+        }
 
         return res.status(200).json({ eventTypes });
       }
