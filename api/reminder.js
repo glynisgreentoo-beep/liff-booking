@@ -23,8 +23,6 @@ module.exports = async function handler(req, res) {
   const calUsername = process.env.CAL_USERNAME;
   const lineToken  = process.env.LINE_CHANNEL_TOKEN;
   const ownerId    = process.env.OWNER_LINE_USER_ID;
-  // 商家通知改用另一個 bot 的 token（減少官方帳號訊息量）；未設定時退回官方帳號 token
-  const ownerToken  = process.env.OWNER_LINE_CHANNEL_TOKEN || lineToken;
   const cronSecret = process.env.CRON_SECRET;
   const reminderKey = process.env.REMINDER_KEY;
 
@@ -119,7 +117,7 @@ module.exports = async function handler(req, res) {
     // ── 沒有預約：只通知店主「明天無預約」（選填，可省一則）──
     if (bookings.length === 0) {
       // 為了省 LINE 額度，無預約時不發送。若想收到「明天沒預約」通知，取消下方註解。
-      // await pushLine(ownerId, "📋 明天沒有預約。", ownerToken);
+      // await pushLine(ownerId, "📋 明天沒有預約。", lineToken);
       return res.status(200).json({ ok: true, count: 0, message: "明天無預約，未發送" });
     }
 
@@ -145,15 +143,14 @@ module.exports = async function handler(req, res) {
 
       const vars = {
         "方案": bk.title,
-        "加購": bk.addons ? "➕ 加購：" + bk.addons : "",
+        "加購": bk.addons ? "加購：" + bk.addons : "",
         "時間": timeStr,
-        "時長": (bk.length || "?"),
-        "姓名": bk.name || "未提供"
+        "時長": (bk.length || "?")
       };
 
       const defaultMsg =
         "🔔 預約提醒\n\n提醒您明天的預約：\n\n📋 " + bk.title + "\n" +
-        (bk.addons ? "➕ 加購：" + bk.addons + "\n" : "") +
+        (bk.addons ? "加購：" + bk.addons + "\n" : "") +
         "📅 " + timeStr + "\n⏱ " + (bk.length || "?") + " 分鐘\n\n" +
         "期待為您服務 💆\n如需取消或改期，請直接回覆訊息。";
 
@@ -178,7 +175,7 @@ module.exports = async function handler(req, res) {
       "\n" +
       lines.join("\n");
 
-    const ownerResult = await pushLine(ownerId, ownerMsg, ownerToken);
+    const ownerResult = await pushLine(ownerId, ownerMsg, lineToken);
 
     console.log("客人提醒:", customerSent, "/ 店主彙整:", ownerResult.ok);
 
